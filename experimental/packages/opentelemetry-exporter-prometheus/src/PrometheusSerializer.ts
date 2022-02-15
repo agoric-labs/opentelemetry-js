@@ -131,21 +131,24 @@ function stringify(
   let hasAttribute = false;
   let attributesStr = '';
 
-  for (const [key, val] of Object.entries(attributes)) {
+  // Write attributes in order, with first-one-wins.
+  const attributesSofar = new Set();
+  const putAttributeEntry = ([key, val]) => {
     const sanitizedAttributeName = sanitizePrometheusMetricName(key);
+    if (attributesSofar.has(sanitizedAttributeName)) {
+      return;
+    }
+    attributesSofar[sanitizedAttributeName] = val;
     hasAttribute = true;
     attributesStr += `${
       attributesStr.length > 0 ? ',' : ''
     }${sanitizedAttributeName}="${escapeAttributeValue(val)}"`;
-  }
+  };
+
+  // Write first attributes, then optional additionalAttributes.
+  Object.entries(attributes).forEach(putAttributeEntry);
   if (additionalAttributes) {
-    for (const [key, val] of Object.entries(additionalAttributes)) {
-      const sanitizedAttributeName = sanitizePrometheusMetricName(key);
-      hasAttribute = true;
-      attributesStr += `${
-        attributesStr.length > 0 ? ',' : ''
-      }${sanitizedAttributeName}="${escapeAttributeValue(val)}"`;
-    }
+    Object.entries(additionalAttributes).forEach(putAttributeEntry);
   }
 
   if (hasAttribute) {
@@ -222,7 +225,7 @@ export class PrometheusSerializer {
           record.attributes,
           value,
           this._appendTimestamp ? timestamp : undefined,
-          undefined
+          record.resource.attributes
         );
         break;
       }
@@ -236,7 +239,7 @@ export class PrometheusSerializer {
             record.attributes,
             value[key],
             this._appendTimestamp ? timestamp : undefined,
-            undefined
+            record.resource.attributes
           );
         }
 
@@ -247,7 +250,7 @@ export class PrometheusSerializer {
           cumulativeSum += val;
           const upperBound = value.buckets.boundaries[idx];
           /** HistogramAggregator is producing different boundary output -
-           * in one case not including inifinity values, in other -
+           * in one case not including infinity values, in other -
            * full, e.g. [0, 100] and [0, 100, Infinity]
            * we should consider that in export, if Infinity is defined, use it
            * as boundary
@@ -260,15 +263,16 @@ export class PrometheusSerializer {
           }
           results += stringify(
             name + '_bucket',
-            record.attributes,
-            cumulativeSum,
-            this._appendTimestamp ? timestamp : undefined,
             {
+              ...record.attributes,
               le:
                 upperBound === undefined || upperBound === Infinity
                   ? '+Inf'
                   : String(upperBound),
-            }
+            },
+            cumulativeSum,
+            this._appendTimestamp ? timestamp : undefined,
+            record.resource.attributes,
           );
         }
         break;
